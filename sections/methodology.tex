@@ -1,4 +1,5 @@
 \subsection{研究方法概述}
+
 CEMP（Carbon-Enhanced Metal-Poor）恒星是研究早期宇宙化学演化和第一代恒星形成的关键探针。其分类标准随着观测技术的进步和理论模型的发展而不断演进\cite{beers1992, aoki2007, norris2013}。本研究采纳当前广泛接受的严格标准（详见表\ref{tab:star_criteria}），基于大规模巡天数据，利用数据驱动的方法系统性地搜寻CEMP恒星候选体。
 
 我们的研究流程遵循一个三阶段框架，旨在从海量低分辨率光谱数据中高效、准确地识别目标。具体步骤如下：
@@ -12,12 +13,9 @@ CEMP（Carbon-Enhanced Metal-Poor）恒星是研究早期宇宙化学演化和�
 这一流程整合了大规模巡天数据与先进的机器学习技术，为在银河系中系统性地发掘稀有的贫金属恒星提供了有效途径。
 
 
-
 \begin{table}[htbp]
     \centering
     \caption{恒星分类参数标准}
-
-    
     \label{tab:star_criteria}
     \begin{tabular}{|l|l|}
     \hline
@@ -29,6 +27,37 @@ CEMP（Carbon-Enhanced Metal-Poor）恒星是研究早期宇宙化学演化和�
     \hline
     VMP（甚贫金属星） & $-2.5 \le [\mathrm{Fe}/\mathrm{H}] < -1.5$ \\
     \hline
+    \end{tabular}
+\end{table}
+
+\subsection{数据筛选标准}
+\label{sec:data_selection_criteria}
+为了确保后续恒星参数预测的准确性和可靠性，我们对从LAMOST DR11中提取的光谱数据实施了一系列严格的质量控制标准。这些标准旨在剔除低质量、存在问题的观测数据，保留最适合进行科学分析的高置信度光谱。筛选过程主要依据LAMOST数据处理流水线提供的质量评估参数，具体标准和理由如下表 \ref{tab:quality_criteria} 所示。
+
+这些筛选标准分为两个层次。第一梯队标准（信噪比和视向速度误差）是保证光谱基础质量的“硬性”门槛，直接关系到光谱特征的真实性和基础参数（如红移）的可靠性。任何不满足这些条件的观测都会被直接舍弃。第二梯队标准（恒星大气参数误差）则提供了进一步的质量控制，用于剔除那些虽然通过了基础筛选，但其物理参数测量结果由流水线判定为置信度不高的光谱。
+
+通过这套多层次的筛选流程，我们构建了一个高质量的光谱样本库，为后续深度学习模型的训练和CEMP恒星的搜寻奠定了坚实的基础。
+
+\begin{table}[htbp]
+    \centering
+    \caption{光谱数据质量筛选标准}
+    \label{tab:quality_criteria}
+    \begin{tabular}{l l >{\raggedright\arraybackslash}p{6cm}}
+    \toprule
+    \textbf{参数} & \textbf{筛选标准} & \textbf{理由} \\
+    \midrule
+    \multicolumn{3}{l}{\textit{第一梯队：基础质量控制}} \\
+    \midrule
+    SNR & SNRG > 20 或 SNRI > 20 & 确保光谱特征的真实性，避免被噪声淹没。 \\
+    & (精细丰度分析: SNRI > 100) & g和i波段信息丰富。 \\
+    \texttt{RV\_err} & \texttt{RV\_err} < 20 km/s & 保证红移校正的准确性。 \\
+    \midrule
+    \multicolumn{3}{l}{\textit{第二梯队：进一步质量保证}} \\
+    \midrule
+    \texttt{Teff\_err} & < 100 K & \multirow{3}{*}{反映流水线对大气参数建模的置信度，剔除不确定性大的光谱。} \\
+    \texttt{logg\_err} &  < 0.1 dex & \\
+    \texttt{FeH\_err} & < 0.1 dex & \\
+    \bottomrule
     \end{tabular}
 \end{table}
 
@@ -46,22 +75,45 @@ CEMP（Carbon-Enhanced Metal-Poor）恒星是研究早期宇宙化学演化和�
 \end{itemize}
 
 综合来看，选择3800-8800 Å 的光谱数据，能够覆盖所有目标科学参数的关键诊断特征，为CEMP恒星的有效识别和详细物理参数测量提供全面且互补的信息。
-
 \subsection{训练数据集构建与预处理}
 \label{sec:data_preparation}
 深度学习模型的性能高度依赖于训练数据的质量。为了构建一个适用于CEMP恒星参数估计的高质量参考数据集，我们整合了来自不同巡天项目的数据，并设计了一套系统性的数据预处理流程。
-
 首先，我们构建用于模型训练的标签集。本研究使用的低分辨率光谱主要来源于LAMOST巡天。为了获得这些光谱对应的精确恒星物理参数（即标签），我们将LAMOST星表与多个高分辨率光谱巡天（如APOGEE DR17、LAMOST-Subaru、SAGA等）的星表进行交叉匹配。这一匹配过程确保了我们的训练样本同时拥有低分辨率光谱和高精度的参数标签（$T_{\text{eff}}$, $\log g$, [Fe/H], [C/H]）。
-
 在构建了交叉匹配样本库之后，我们进一步对数据集进行筛选与优化以构造最终的训练集。第一步，为保证数据质量，我们移除了信噪比（SNR）低于50的光谱，确保了训练数据的可靠性。第二步，针对恒星金属丰度（[Fe/H]）存在的长尾分布问题，我们采用了随机均值采样方法。该方法通过平衡不同金属丰度区间的样本数量，有效缓解了因贫金属星样本稀少导致的数据不平衡问题，避免模型性能受到影响。
-
 完成数据集的构造后，我们执行以下数据预处理步骤，旨在消除仪器效应和观测噪声，并将数据转换为适用于深度学习模型的标准化格式：
-
 \begin{enumerate}
-    \item \textbf{数据提取与格式转换：} 原始光谱数据以FITS格式存储。我们首先从中提取光谱流量、波长序列及恒星标识符，并将其整合为单一的CSV文件，以便于后续的高效处理。
-    \item \textbf{静止系波长校正：} 恒星的径向速度会导致光谱产生多普勒频移。我们利用LAMOST提供的红移（z）值，将观测波长（$\lambda_{\text{obs}}$）校正至静止波长（$\lambda_{\text{rest}}$），其关系为 $\lambda_{\text{rest}} = \lambda_{\text{obs}} / (1+z)$。此步骤确保了不同光谱特征在共同的参考系下对齐，是后续分析的基础。
-    \item \textbf{数据清洗与归一化：} 为保证光谱的物理真实性，我们采用中值滤波等方法修复由宇宙线或仪器故障造成的坏点和噪声。随后，对光谱进行连续谱归一化，即通过拟合光谱包络并用原始流量除以该包络，以消除距离、星际红化等外部因素的影响，凸显由恒星自身物理性质决定的吸收线特征。
-    \item \textbf{光谱重采样：} 不同来源的光谱具有不同的分辨率和采样间隔。为了让模型能够处理统一尺寸的输入，我们将所有归一化后的光谱通过线性插值重采样至1 Å的等宽波长单元中。对于本研究使用的3800-8800 Å波段，每条光谱被转换为一个固定长度的向量。
+    \item \textbf{加载FITS文件 (step1\_extraction.py)}:  
+    预处理的第一步是从FITS格式文件中加载恒星光谱数据。我们将观测到的输入光谱序列表示为 $F_{\mathrm{obs}}(\lambda_{\mathrm{obs}})$，其中 $F_{\mathrm{obs}}$ 是流量，$\lambda_{\mathrm{obs}}$ 是对应的观测波长。
+    
+    \item \textbf{红移校正 (step2\_redshift\_correction.py)}:  
+    利用已知的目标天体红移值 $z$，通过多普勒效应公式将观测波长 $\lambda_{\mathrm{obs}}$ 转换到静止波长坐标系 $\lambda_{\mathrm{rest}}$：
+    \begin{equation}
+        \lambda_{\mathrm{rest}} = \frac{\lambda_{\mathrm{obs}}}{1+z}
+    \end{equation}
+    该过程可表示为
+    \[
+        F_{\mathrm{obs}}(\lambda_{\mathrm{obs}}) \;\rightarrow\; F(\lambda_{\mathrm{rest}}).
+    \]
+    为简洁起见，后续步骤中的光谱 $F(\lambda)$ 均指代静止系光谱。    
+    \item \textbf{光谱截断}:  
+    为了专注于包含最多恒星物理信息的波段，我们对光谱 $F(\lambda)$ 进行了截断，选取波长范围为 \textbf{[3800, 5700] \AA} 和 \textbf{[5900, 8000] \AA}。
+    \item \textbf{小波变换去噪 (step3\_noise\_removal.py)}:  
+    恒星光谱 $F(\lambda)$ 中普遍存在随机噪声 $\epsilon$。我们采用小波变换（Wavelet Transform, WT）技术对其进行去噪处理。该过程可以形式化地描述为：首先对光谱信号进行小波分解得到一系列系数 $w$，然后对系数进行阈值处理（thresholding）得到新的系数 $w'$，最后通过逆小波变换（Inverse Wavelet Transform, IWT）重构出去噪后的光谱 $F_{\mathrm{denoised}}(\lambda)$。整个流程可以表示为：
+    \begin{equation}
+        F(\lambda) \xrightarrow{\mathrm{WT}} w 
+        \xrightarrow{\text{threshold}} w' 
+        \xrightarrow{\mathrm{IWT}} F_{\mathrm{denoised}}(\lambda)
+    \end{equation}    
+    \item \textbf{光谱归一化 (step4\_normalization.py)}:  
+    为了消除各种与距离和仪器相关的因素，需要对光谱进行归一化。此步骤的核心是拟合出去噪后光谱 $F_{\mathrm{denoised}}(\lambda)$ 的连续谱（continuum），记作 $C(\lambda)$。然后，通过以下公式计算归一化光谱：
+    \begin{equation}
+        F_{\mathrm{norm}}(\lambda) = \frac{F_{\mathrm{denoised}}(\lambda)}{C(\lambda)}
+    \end{equation}
+    此步骤的产出是成对的：\textbf{连续谱 $C(\lambda)$} 和 \textbf{归一化光谱 $F_{\mathrm{norm}}(\lambda)$}~\citep{Aoki2007}。
+    \item \textbf{等间距重采样 (step5\_resample.py)}:  
+    原始光谱的波长采样点 $\{\lambda_i\}$ 通常是不均匀的。为了便于后续模型输入，我们通过插值方法（如线性或样条插值），将归一化光谱 $F_{\mathrm{norm}}(\lambda)$ 从其原始的波长网格 $\{\lambda_i\}$ 重采样到一个统一的、等间距的新波长网格 $\{\lambda'_j\}$ 上，得到最终的光谱序列 $F_{\mathrm{final}}(\lambda'_j)$。
+    \item \textbf{数据集划分 (step6\_split\_dataset.py)}:  
+    最后，将预处理完成的光谱数据集划分为训练集、验证集和测试集。
 \end{enumerate}
 
 经过以上流程，我们最终获得了一个标准化的、清洁的、可直接用于模型训练的数据集。该数据集中的每一个样本都是一个代表恒星光谱特征的向量，并附有高精度的物理参数标签，为后续精准预测恒星参数提供了高质量的输入。

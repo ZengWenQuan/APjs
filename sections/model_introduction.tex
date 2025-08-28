@@ -1,32 +1,80 @@
-\section{多尺度注意力卷积循环网络模型}
-\label{sec:model_architecture}
+\section{异构特征流网络 (HFS-Net)}
+\label{sec:hfs_net_architecture}
 
-为解决现有模型在光谱特征提取中的局限性（\ref{subsec:motivation_dl}），我们提出了一种新颖的端到端深度学习架构，名为多尺度注意力卷积循环网络（Multi-scale Attentional Convolutional Recurrent Network）。该模型通过融合多尺度卷积、通道注意力机制和循环神经网络，旨在实现对恒星光谱信息更深层次、更全面的理解和建模。
+为了更全面地从恒星光谱中提取多模态信息，我们提出了一种新颖的端到端深度学习架构，名为异构特征流网络 (Heterogeneous Feature Stream Network, HFS-Net)。该模型的核心思想是，针对物理来源与信号特性完全不同的连续谱和归一化谱，设计两个独立的、架构异构的特征提取分支，然后对提取到的深层特征进行高效融合，最终通过一个共享的预测头实现对多个恒星物理参数的同步回归。该模型的所有组件均采用模块化设计，可通过配置文件灵活替换与组合。
 
 \subsection{模型总体架构}
-本模型的核心设计思想是分层、分模块地处理光谱数据。首先，通过一个金字塔形的卷积结构并行提取不同尺度的光谱特征；然后，利用通道注意力机制对这些特征进行加权，使模型能够聚焦于对当前任务最重要的信息；最后，通过一个长短期记忆网络（LSTM）捕捉光谱的全局序列依赖关系，并将最终的特征表示映射到物理参数空间。
+\label{subsec:hfs_net_overview}
+
+本模型的总体架构如图~\ref{fig:hfs_net_diagram}所示。数据处理流程遵循“分离-并行处理-融合-预测”的原则。首先，通过\ref{subsec:preprocessing}中描述的预处理方法将原始光谱分离为连续谱和归一化谱。随后，这两个信号被送入两个并行的、专门设计的特征提取分支：
+
+\begin{itemize}
+    \item \textbf{连续谱分支}，一个基于频域的混合专家网络（MoE），旨在捕捉光谱的全局、低频特性。
+    \item \textbf{归一化谱分支}，一个基于多尺度卷积金字塔的网络，旨在捕捉吸收线的局部、高频细节。
+\end{itemize}
+
+两个分支提取的特征在经过维度对齐后，被一个融合模块进行合并。最终，融合后的特征向量被送入一个多任务预测头，以回归得到四个关键的恒星物理参数 ($T_{\text{eff}}$, $\log g$, [Fe/H], [C/Fe])。
+
+\begin{figure}[h!]
+    \centering
+    % \includegraphics[width=\textwidth]{hfs_net_diagram.png} % 请将 hfs_net_diagram.png 替换为您的模型图文件名
+    \framebox[0.9\textwidth][c]{\rule{0pt}{10cm} \large \textbf{HFS-Net 模型结构图占位符}}
+    \caption{异构特征流网络 (HFS-Net) 的整体架构图。}
+    \label{fig:hfs_net_diagram}
+\end{figure}
+
+\begin{table}[h!]
+\centering
+\caption{HFS-Net 模型关键模块的超参数配置。}
+\label{tab:hfs_net_params}
+\renewcommand{\arraystretch}{1.2} % 增加行高
+\begin{tabular}{lll}
+\toprule
+\textbf{模块 (Module)} & \textbf{参数 (Parameter)} & \textbf{值 (Value)} \\
+\midrule
+\multirow{5}{*}{连续谱分支 \\ (\texttt{CustomMoEBranch})} 
+ & FFT: n\_fft & 512 \\
+ & FFT: hop\_length & 128 \\
+ & MoE: num\_experts & 4 \\
+ & MoE: k (top-k) & 2 \\
+ & 专家网络结构 & 3层金字塔CNN \\
+\midrule
+\multirow{3}{*}{归一化谱分支 \\ (\texttt{MultiScalePyramidBranch})} % multrow包问题，这里检测不到主文件引入了
+ & 金字塔层数 & 3 \\
+ & 输出通道数 & {[}16, 32, 64{]} \\
+ & 并行卷积核尺寸 & {[}3, 5, 7{]} \\
+\midrule
+融合模块 & 融合策略 & add (逐元素相加) \\
+\midrule
+\multirow{3}{*}{预测头 \\ (\texttt{MultiTaskHead})} 
+ & 卷积金字塔层数 & 4 \\
+ & FFN层维度 & {[}1024, 256, 128{]} \\
+ & Dropout & 0.3 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
 
 \subsection{核心模块详解}
+\label{subsec:hfs_net_modules}
 
-\subsubsection{金字塔形多尺度卷积模块}
-与使用单一尺寸卷积核的传统CNN不同，我们的模型采用了一种金字塔形的并行卷积结构。该模块包含多个并行的卷积分支，每个分支使用不同大小的一维卷积核（例如，3x1, 5x1, 11x1等）。
-\begin{itemize}
-    \item \textbf{小卷积核}：负责捕捉光谱中尖锐、局部的吸收线细节。
-    \item \textbf{大卷积核}：负责捕捉宽广的谱线翼部、分子带以及连续谱的缓变形状。
-\end{itemize}
-所有分支的输出特征图（Feature Maps）在通道维度上被拼接（Concatenate）在一起，形成一个包含了从局部到全局的多尺度特征表示。这种金字塔结构确保了模型不会在提取某一类特征时丢失另一类重要信息。
+\subsubsection{连续谱分支：基于频域的混合专家网络}
+\textbf{设计动机：} 连续谱的形状复杂，其缓变的趋势中可能混合了由恒星自身物理过程、星际红化及仪器响应等多种因素叠加而成的宽带特征。单一的卷积结构难以完全解耦这些多样化的模式。我们采用混合专家网络（Mixture-of-Experts, MoE），旨在通过“分而治之”的策略，让不同的“专家”子网络学习处理不同的特征模式，从而在不显著增加总计算量的前提下，提升模型的容量和表达能力。
 
-\subsubsection{通道注意力机制 (Channel Attention)}
-在多尺度特征融合之后，我们引入了通道注意力模块。光谱的不同波段（即特征图的不同通道）对于预测不同的恒星参数其重要性是不同的。例如，CH G带对[C/Fe]的预测至关重要，而巴尔末线对$T_{\text{eff}}$的预测贡献更大。
+\textbf{实现细节：} 该分支 (\texttt{CustomMoEBranch}) 首先通过快速傅里叶变换(FFT)将连续谱信号从波长域转换到频域。然后，一个轻量级的门控网络 (Gating Network) 会根据输入的频域特征，动态地、稀疏地选择激活多个专家网络中的Top-k个。每个专家网络都是一个独立的轻量级金字塔卷积模块，可以专注于学习和处理特定的频域模式（如特定的频率成分或形状）。
 
-通道注意力机制能够让模型自适应地学习每个特征通道的重要性权重。它首先对特征图进行全局平均池化，得到一个通道描述符向量，然后通过两个全连接层学习通道间的非线性依赖关系，最终为每个通道生成一个0到1之间的权重。这些权重将被乘回到原始的特征图上，从而增强关键特征通道的表达，抑制无关或噪声特征通道的影响。
+\subsubsection{归一化谱分支：多尺度金字塔卷积网络}
+\textbf{设计动机：} 归一化谱中的吸收线形态各异，有的因恒星高速自转或高压环境而变得宽阔平缓，有的则因低温环境而显得尖锐狭窄。为了能同时、且鲁棒地捕捉这些不同形态的谱线特征，该分支 (\texttt{MultiScalePyramidBranch}) 采用了多尺度并行卷积的设计。
 
-\subsubsection{长短期记忆网络 (LSTM) 用于序列建模}
-卷积操作本质上是局部的。为了捕捉光谱作为一个完整序列的长程依赖关系（例如，不同元素的多条谱线之间的相关性），我们将经过注意力加权的特征图输入到一个双向长短期记忆网络（Bidirectional LSTM）中。
-\begin{itemize}
-    \item \textbf{LSTM单元}：通过其独特的门控机制（输入门、遗忘门、输出门），LSTM能够有效地学习和记忆序列中的长期信息，解决了标准RNN中的梯度消失问题。
-    \item \textbf{双向结构}：通过同时从前向和后向处理光谱序列，模型能够利用每个点的上下文信息，从而更全面地理解谱线特征的全局意义。
-\end{itemize}
+\textbf{实现细节：} 在金字塔结构的每一层，都并列着多个使用不同尺寸卷积核（例如，3x1, 5x1, 7x1）的卷积层。小卷积核擅长定位精确的、孤立的窄线轮廓，而大卷积核则能更好地整合宽线翼部或由多个邻近谱线混合（blending）而成的复合特征。通过将这些不同尺度的特征图进行拼接，模型能够构建一个对谱线形态变化不敏感的、信息丰富的层级化特征表示。
 
-\subsection{输出与训练}
-最终，LSTM层的输出被送入一个全连接层，回归得到四个恒星物理参数（$T_{\text{eff}}$, $\log g$, [Fe/H], [C/H]）。我们同样采用Adam优化器和均方误差（MSE）损失函数进行端到端的模型训练。
+\subsubsection{特征融合与多任务预测}
+\textbf{特征融合：} 两个分支的输出特征图在经过自适应池化层对齐长度，并通过1x1卷积对齐通道数后，通过简单的逐元素相加 (\texttt{strategy: 'add'}) 进行融合。这种融合策略简洁高效，它假设两个分支学习到的特征是相互对齐且可以线性叠加的，共同构成一个统一的、描述恒星状态的特征空间。
+
+\textbf{多任务预测头：} 融合后的特征被送入一个共享的多任务预测头 (\texttt{MultiTaskHead})。该模块首先通过一个内部的卷积金字塔做最终的特征抽象，然后由一个多层前馈网络 (FFN) 回归出所有目标参数。将所有参数的预测放在同一个头中进行，是一种典型的多任务学习范式，它使得模型在学习预测一个参数时，可以利用到与其他参数共享的、潜在的物理关联信息（例如，$T_{\text{eff}}$和$\log g$之间存在的物理关联），从而可能提升所有任务的整体预测精度。
+
+\subsection{训练策略}
+\label{subsec:hfs_net_training}
+
+我们采用均方误差（Mean Squared Error, MSE）作为模型的损失函数，并使用 AdamW 优化器进行端到端的模型训练。学习率调度器采用余弦退火（Cosine Annealing）策略。所有超参数均在配置文件 \texttt{flexiblefusionnet.yaml} 中定义。
